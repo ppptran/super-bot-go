@@ -102,23 +102,4 @@ To keep the bot running in the background and start automatically on boot:
     ```
 
 
-## Releasing a New Version
 
-The project uses GitHub Actions to automatically build and release binaries.
-
-1.  **Commit your changes**:
-    ```bash
-    git add .
-    git commit -m "Your changes description"
-    git push origin main
-    ```
-
-2.  **Create a Tag**:
-    ```bash
-    git tag v1.0.0
-    git push origin v1.0.0
-    ```
-
-3.  **Check GitHub**:
-    - Go to the **Actions** tab to see the build progress.
-    - Once finished, go to the **Releases** section to download the ready-to-use binaries.
