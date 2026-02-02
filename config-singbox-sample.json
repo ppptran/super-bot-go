@@ -1,0 +1,140 @@
+{
+    "log": {
+        "level": "info"
+    },
+    "experimental": {
+        "clash_api": {
+            "external_controller": "0.0.0.0:9090",
+            "external_ui": "/etc/sing-box/ui",
+            "secret": "YOUR_SECRET",
+            "default_mode": "rule"
+        }
+    },
+    "inbounds": [
+        {
+            "type": "mixed",
+            "tag": "mixed-in",
+            "listen": "0.0.0.0",
+            "listen_port": 2080,
+            "sniff": true
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "selector",
+            "tag": "ExitNode",
+            "outbounds": [
+                "WG-Hanoi",
+                "WG-HK-Phooey",
+                "WG-HK-Victoria",
+                "DIRECT"
+            ],
+            "default": "WG-Hanoi"
+        },
+        {
+            "type": "direct",
+            "tag": "WG-Hanoi",
+            "bind_interface": "wg0"
+        },
+        {
+            "type": "direct",
+            "tag": "WG-HK-Phooey",
+            "bind_interface": "wg1"
+        },
+        {
+            "type": "direct",
+            "tag": "WG-HK-Victoria",
+            "bind_interface": "wg2"
+        },
+        {
+            "type": "direct",
+            "tag": "DIRECT"
+        }
+    ],
+    "route": {
+        "rules": [
+            {
+                "ip_cidr": [
+                    "172.18.0.10/32"
+                ],
+                "port": [
+                    9090
+                ],
+                "action": "route",
+                "outbound": "DIRECT"
+            }
+        ],
+        "final": "ExitNode"
+    },
+    "endpoints": [
+        {
+            "type": "wireguard",
+            "tag": "link-wg0",
+            "system": true,
+            "name": "wg0",
+            "mtu": 1408,
+            "address": [
+                "100.88.207.16/32"
+            ],
+            "private_key": "YOUR_PRIVATE_KEY",
+            "listen_port": 10000,
+            "peers": [
+                {
+                    "address": "YOUR_PEER_IP",
+                    "port": 65142,
+                    "public_key": "YOUR_PUBLIC_KEY",
+                    "pre_shared_key": "YOUR_PRE_SHARED_KEY",
+                    "allowed_ips": [
+                        "0.0.0.0/0"
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "wireguard",
+            "tag": "link-wg1",
+            "system": true,
+            "name": "wg1",
+            "mtu": 1408,
+            "address": [
+                "100.88.207.16/32"
+            ],
+            "private_key": "YOUR_PRIVATE_KEY",
+            "listen_port": 10001,
+            "peers": [
+                {
+                    "address": "YOUR_PEER_IP",
+                    "port": 65142,
+                    "public_key": "YOUR_PUBLIC_KEY",
+                    "pre_shared_key": "YOUR_PRE_SHARED_KEY",
+                    "allowed_ips": [
+                        "0.0.0.0/0"
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "wireguard",
+            "tag": "link-wg2",
+            "system": true,
+            "name": "wg2",
+            "mtu": 1408,
+            "address": [
+                "100.88.207.16/32"
+            ],
+            "private_key": "YOUR_PRIVATE_KEY",
+            "listen_port": 10002,
+            "peers": [
+                {
+                    "address": "YOUR_PEER_IP",
+                    "port": 65142,
+                    "public_key": "YOUR_PUBLIC_KEY",
+                    "pre_shared_key": "YOUR_PRE_SHARED_KEY",
+                    "allowed_ips": [
+                        "0.0.0.0/0"
+                    ]
+                }
+            ]
+        }
+    ]
+}
