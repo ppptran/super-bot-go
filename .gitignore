@@ -1,0 +1,14 @@
+# Config and Secrets
+.env
+
+# Binaries
+super-bot
+# Mac/Linux
+main
+# Windows
+super-bot.exe
+main.exe
+
+# IDEs
+.vscode/
+.idea/
