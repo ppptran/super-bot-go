@@ -52,7 +52,7 @@ func GetSingboxInfo(ctx context.Context, resultChan chan<- SingboxInfo) {
 	currentNode := exitNode.Now
 	allNodes := make([]string, 0)
 	for _, node := range exitNode.All {
-		if node != "DIRECT" && node != "REJECT" && node != "GLOBAL" {
+		if node != "REJECT" && node != "GLOBAL" {
 			allNodes = append(allNodes, node)
 		}
 	}
