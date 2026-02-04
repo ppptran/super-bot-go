@@ -46,13 +46,13 @@ func CreateDashboardEmbed(data *core.DashboardData) *discordgo.MessageEmbed {
 	if data.MikroTik.Error != "" {
 		mtValue = fmt.Sprintf("❌ Lỗi: %s", data.MikroTik.Error)
 	} else {
-		mtValue = fmt.Sprintf("**Router:** `%s`\n**CPU:** `%s%%` | **RAM:** `%s`\n**Uptime:** `%s`\n**VNPT:** ↓ `%.2f Mbps` | ↑ `%.2f Mbps`",
+		mtValue = fmt.Sprintf("**Router:** `%s`\n**CPU:** `%s%%` | **RAM:** `%s`\n**Uptime:** `%s`\n**PPPoE:** ↓ `%.2f Mbps` | ↑ `%.2f Mbps`",
 			data.MikroTik.Name,
 			data.MikroTik.CPU,
 			data.MikroTik.RAM,
 			data.MikroTik.Uptime,
-			data.VNPT.RxSpeed,
-			data.VNPT.TxSpeed,
+			data.PPPoE.RxSpeed,
+			data.PPPoE.TxSpeed,
 		)
 	}
 

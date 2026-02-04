@@ -143,7 +143,9 @@ func HandleStatusMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
 	}
-	s.ChannelMessageSendComplex(m.ChannelID, msg)
+	if _, err := s.ChannelMessageSendComplex(m.ChannelID, msg); err != nil {
+		fmt.Printf("❌ Discord Error: Failed to send status message: %v\n", err)
+	}
 }
 
 // HandlePingMessage handles the !ping legacy command

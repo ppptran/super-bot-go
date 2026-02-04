@@ -7,7 +7,7 @@ type DashboardData struct {
 	MikroTik  MikroTikInfo
 	Proxmox   ProxmoxInfo
 	Singbox   SingboxInfo
-	VNPT      VNPTSpeed
+	PPPoE     PPPoESpeed
 	Timestamp string
 }
 
@@ -43,8 +43,8 @@ type SingboxInfo struct {
 	Error       string
 }
 
-// VNPTSpeed contains VNPT bandwidth information
-type VNPTSpeed struct {
+// PPPoESpeed contains PPPoE bandwidth information
+type PPPoESpeed struct {
 	RxSpeed float64 // Download speed in Mbps
 	TxSpeed float64 // Upload speed in Mbps
 	Error   string

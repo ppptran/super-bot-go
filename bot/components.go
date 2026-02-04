@@ -13,9 +13,10 @@ func CreateNodeButtons(data *core.DashboardData) []discordgo.MessageComponent {
 	var components []discordgo.MessageComponent
 	var currentRow []discordgo.MessageComponent
 
-	// Add node buttons (max 25 buttons per message, Discord limit)
+	// Add node buttons (max 24 buttons to allow refresh button as the 25th)
+	// Discord allows max 5 Action Rows per message, max 5 buttons per row
 	for i, node := range data.Singbox.AllNodes {
-		if i >= 24 { // Leave room for refresh button
+		if i >= 24 {
 			break
 		}
 
@@ -58,14 +59,7 @@ func CreateNodeButtons(data *core.DashboardData) []discordgo.MessageComponent {
 		}
 	}
 
-	// Add remaining buttons
-	if len(currentRow) > 0 {
-		components = append(components, discordgo.ActionsRow{
-			Components: currentRow,
-		})
-	}
-
-	// Add refresh button on its own row
+	// Add refresh button to current row or new row
 	refreshButton := discordgo.Button{
 		Label:    "Refresh",
 		Style:    discordgo.PrimaryButton,
@@ -75,9 +69,14 @@ func CreateNodeButtons(data *core.DashboardData) []discordgo.MessageComponent {
 		},
 	}
 
-	components = append(components, discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{refreshButton},
-	})
+	currentRow = append(currentRow, refreshButton)
+
+	// Add final row
+	if len(currentRow) > 0 {
+		components = append(components, discordgo.ActionsRow{
+			Components: currentRow,
+		})
+	}
 
 	return components
 }

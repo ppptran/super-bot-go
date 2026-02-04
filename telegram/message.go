@@ -49,11 +49,11 @@ func FormatDashboardMessage(data *core.DashboardData) string {
 		sb.WriteString(fmt.Sprintf("⏱ Uptime: `%s`\n", val(data.MikroTik.Uptime)))
 	}
 
-	// --- VNPT Section ---
-	if data.VNPT.Error != "" {
-		sb.WriteString("🌐 VNPT: ❌ Lỗi kết nối\n")
+	// --- PPPoE Section ---
+	if data.PPPoE.Error != "" {
+		sb.WriteString("🌐 PPPoE: ❌ Lỗi kết nối\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("🌐 VNPT: ↓ `%.2f Mbps` | ↑ `%.2f Mbps`\n", data.VNPT.RxSpeed, data.VNPT.TxSpeed))
+		sb.WriteString(fmt.Sprintf("🌐 PPPoE: ↓ `%.2f Mbps` | ↑ `%.2f Mbps`\n", data.PPPoE.RxSpeed, data.PPPoE.TxSpeed))
 	}
 
 	sb.WriteString("----------------------------\n")

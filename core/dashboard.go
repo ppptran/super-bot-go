@@ -13,13 +13,13 @@ func GetDashboardData(ctx context.Context) (*DashboardData, error) {
 	mikrotikChan := make(chan MikroTikInfo, 1)
 	proxmoxChan := make(chan ProxmoxInfo, 1)
 	singboxChan := make(chan SingboxInfo, 1)
-	vnptChan := make(chan VNPTSpeed, 1)
+	pppoeChan := make(chan PPPoESpeed, 1)
 
 	// Launch goroutines to fetch data concurrently
 	go GetMikroTikInfo(ctx, mikrotikChan)
 	go GetProxmoxInfo(ctx, proxmoxChan)
 	go GetSingboxInfo(ctx, singboxChan)
-	go GetVNPTSpeed(ctx, vnptChan)
+	go GetPPPoESpeed(ctx, pppoeChan)
 
 	// Create timeout context (max 5 seconds for all operations)
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -29,7 +29,7 @@ func GetDashboardData(ctx context.Context) (*DashboardData, error) {
 	var mikrotik MikroTikInfo
 	var proxmox ProxmoxInfo
 	var singbox SingboxInfo
-	var vnpt VNPTSpeed
+	var pppoe PPPoESpeed
 
 	// Wait for all results or timeout
 	resultsReceived := 0
@@ -53,11 +53,11 @@ func GetDashboardData(ctx context.Context) (*DashboardData, error) {
 				resultsReceived++
 				singboxChan = nil
 			}
-		case v, ok := <-vnptChan:
+		case v, ok := <-pppoeChan:
 			if ok {
-				vnpt = v
+				pppoe = v
 				resultsReceived++
-				vnptChan = nil
+				pppoeChan = nil
 			}
 		case <-timeoutCtx.Done():
 			// Timeout: return partial data
@@ -68,14 +68,14 @@ func GetDashboardData(ctx context.Context) (*DashboardData, error) {
 	// Get current timestamp
 	timestamp := GetVietnamTime()
 
-	fmt.Printf("DEBUG: Dashboard Data:\nProxmox: %+v\nMikroTik: %+v\nVNPT: %+v\nSingbox: %+v\n",
-		proxmox, mikrotik, vnpt, singbox)
+	fmt.Printf("DEBUG: Dashboard Data:\nProxmox: %+v\nMikroTik: %+v\nPPPoE: %+v\nSingbox: %+v\n",
+		proxmox, mikrotik, pppoe, singbox)
 
 	return &DashboardData{
 		MikroTik:  mikrotik,
 		Proxmox:   proxmox,
 		Singbox:   singbox,
-		VNPT:      vnpt,
+		PPPoE:     pppoe,
 		Timestamp: timestamp,
 	}, nil
 }

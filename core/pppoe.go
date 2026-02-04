@@ -8,8 +8,8 @@ import (
 	"github.com/gosnmp/gosnmp"
 )
 
-// GetVNPTSpeed measures VNPT bandwidth by sampling SNMP counters twice
-func GetVNPTSpeed(ctx context.Context, resultChan chan<- VNPTSpeed) {
+// GetPPPoESpeed measures PPPoE bandwidth by sampling SNMP counters twice
+func GetPPPoESpeed(ctx context.Context, resultChan chan<- PPPoESpeed) {
 	defer close(resultChan)
 
 	// Initialize SNMP client
@@ -24,7 +24,7 @@ func GetVNPTSpeed(ctx context.Context, resultChan chan<- VNPTSpeed) {
 
 	err := snmp.Connect()
 	if err != nil {
-		resultChan <- VNPTSpeed{Error: err.Error()}
+		resultChan <- PPPoESpeed{Error: err.Error()}
 		return
 	}
 	defer snmp.Conn.Close()
@@ -36,12 +36,12 @@ func GetVNPTSpeed(ctx context.Context, resultChan chan<- VNPTSpeed) {
 	// Sample 1
 	result1, err := snmp.Get([]string{rxOID, txOID})
 	if err != nil {
-		resultChan <- VNPTSpeed{Error: err.Error()}
+		resultChan <- PPPoESpeed{Error: err.Error()}
 		return
 	}
 
 	if len(result1.Variables) < 2 {
-		resultChan <- VNPTSpeed{Error: "Invalid SNMP response"}
+		resultChan <- PPPoESpeed{Error: "Invalid SNMP response"}
 		return
 	}
 
@@ -54,12 +54,12 @@ func GetVNPTSpeed(ctx context.Context, resultChan chan<- VNPTSpeed) {
 	// Sample 2
 	result2, err := snmp.Get([]string{rxOID, txOID})
 	if err != nil {
-		resultChan <- VNPTSpeed{Error: err.Error()}
+		resultChan <- PPPoESpeed{Error: err.Error()}
 		return
 	}
 
 	if len(result2.Variables) < 2 {
-		resultChan <- VNPTSpeed{Error: "Invalid SNMP response"}
+		resultChan <- PPPoESpeed{Error: "Invalid SNMP response"}
 		return
 	}
 
@@ -70,7 +70,7 @@ func GetVNPTSpeed(ctx context.Context, resultChan chan<- VNPTSpeed) {
 	rxSpeed := float64(rx2-rx1) * 8 / 1048576
 	txSpeed := float64(tx2-tx1) * 8 / 1048576
 
-	resultChan <- VNPTSpeed{
+	resultChan <- PPPoESpeed{
 		RxSpeed: roundFloat(rxSpeed, 2),
 		TxSpeed: roundFloat(txSpeed, 2),
 	}
