@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"fmt"
 	"log"
 	"os"
@@ -31,10 +32,16 @@ func main() {
 				bot.HandleStatusCommand(s, i)
 			case "ping":
 				bot.HandlePingCommand(s, i)
+			case "ffvpn":
+				bot.HandleFFVPNStatusCommand(s, i)
 			}
 		case discordgo.InteractionMessageComponent:
-			// Handle button clicks
-			bot.HandleButtonClick(s, i)
+			// Handle button clicks (ffvpn buttons routed separately)
+			if strings.HasPrefix(i.MessageComponentData().CustomID, "ffvpn") {
+				bot.HandleFFVPNButtonClick(s, i)
+			} else {
+				bot.HandleButtonClick(s, i)
+			}
 		}
 	})
 
@@ -60,6 +67,10 @@ func main() {
 		{
 			Name:        "ping",
 			Description: "Check bot latency",
+		},
+		{
+			Name:        "ffvpn",
+			Description: "FFVPN server list & switch",
 		},
 	}
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"log"
 	"os"
 	"os/signal"
@@ -43,12 +44,18 @@ func main() {
 				switch update.Message.Command() {
 				case "status":
 					go telegram.HandleStatusCommand(bot, update)
+				case "ffvpn":
+					go telegram.HandleFFVPNStatusCommand(bot, update)
 				}
 			}
 
 			// Handle callbacks (buttons)
 			if update.CallbackQuery != nil {
-				go telegram.HandleButtonCallback(bot, update)
+				if strings.HasPrefix(update.CallbackQuery.Data, "ffvpn") {
+					go telegram.HandleFFVPNButtonCallback(bot, update)
+				} else {
+					go telegram.HandleButtonCallback(bot, update)
+				}
 			}
 		}
 	}()

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"super-bot/bot"
 	"super-bot/core"
 	"super-bot/telegram"
@@ -32,9 +33,15 @@ func main() {
 				bot.HandleStatusCommand(s, i)
 			case "ping":
 				bot.HandlePingCommand(s, i)
+			case "ffvpn":
+				bot.HandleFFVPNStatusCommand(s, i)
 			}
 		case discordgo.InteractionMessageComponent:
-			bot.HandleButtonClick(s, i)
+			if strings.HasPrefix(i.MessageComponentData().CustomID, "ffvpn") {
+				bot.HandleFFVPNButtonClick(s, i)
+			} else {
+				bot.HandleButtonClick(s, i)
+			}
 		}
 	})
 
@@ -67,6 +74,7 @@ func main() {
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "status", Description: "Display server dashboard"},
 		{Name: "ping", Description: "Check bot latency"},
+		{Name: "ffvpn", Description: "FFVPN server list & switch"},
 	}
 	for _, cmd := range commands {
 		if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", cmd); err != nil {
@@ -99,11 +107,17 @@ func main() {
 				switch update.Message.Command() {
 				case "status":
 					go telegram.HandleStatusCommand(tgBot, update)
+				case "ffvpn":
+					go telegram.HandleFFVPNStatusCommand(tgBot, update)
 				}
 			}
 
 			if update.CallbackQuery != nil {
-				go telegram.HandleButtonCallback(tgBot, update)
+				if strings.HasPrefix(update.CallbackQuery.Data, "ffvpn") {
+					go telegram.HandleFFVPNButtonCallback(tgBot, update)
+				} else {
+					go telegram.HandleButtonCallback(tgBot, update)
+				}
 			}
 		}
 	}()
