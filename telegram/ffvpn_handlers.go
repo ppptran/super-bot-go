@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"super-bot/core"
 	"time"
@@ -75,7 +76,46 @@ func answerFFVPNCallback(bot *tgbotapi.BotAPI, id, text string, alert bool) {
 	}
 }
 
-// HandleFFVPNButtonCallback handles "ffvpn_e|<host>" and navigation payloads.
+// parseFFVPNEdgeRef parses the short "<countryCode>|<index>" edge payload.
+func parseFFVPNEdgeRef(ref string) (string, int, bool) {
+	parts := strings.SplitN(ref, "|", 2)
+	if len(parts) != 2 {
+		return "", 0, false
+	}
+	idx, err := strconv.Atoi(parts[1])
+	if err != nil || idx < 0 {
+		return "", 0, false
+	}
+	return parts[0], idx, true
+}
+
+// switchFFVPNEdgeRef resolves a short ref against the current edge list and
+// switches to it. Keeping callback data to code+index avoids Telegram's
+// 64-byte callback_data limit, which long hostnames can exceed.
+func switchFFVPNEdgeRef(bot *tgbotapi.BotAPI, callbackID, code string, idx int) bool {
+	ctx, cancel := ffvpnContext()
+	defer cancel()
+	ch := make(chan core.FFVPNInfo, 1)
+	core.GetFFVPNInfo(ctx, ch)
+	info := <-ch
+	if info.Error != "" {
+		answerFFVPNCallback(bot, callbackID, "❌ "+info.Error, true)
+		return false
+	}
+	edge, ok := core.FindFFVPNEdge(info, code, idx)
+	if !ok {
+		answerFFVPNCallback(bot, callbackID, "❌ Edge không còn tồn tại — bấm Refresh", true)
+		return false
+	}
+	if err := core.SwitchFFVPNEdge(edge); err != nil {
+		answerFFVPNCallback(bot, callbackID, "❌ Lỗi: "+err.Error(), true)
+		return false
+	}
+	answerFFVPNCallback(bot, callbackID, fmt.Sprintf("✅ Đã chuyển sang %s:%d", edge.CityName, edge.ServerPort), false)
+	return true
+}
+
+// HandleFFVPNButtonCallback handles "ffvpn_e|<code>|<idx>" and navigation payloads.
 func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	if !IsAuthorizedCallback(update) {
 		answerUnauthorized(bot, update)
@@ -93,12 +133,19 @@ func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	case data == "ffvpn_noop", strings.HasPrefix(data, "ffvpn_c|"):
 		answerFFVPNCallback(bot, callback.ID, "", false)
 	case strings.HasPrefix(data, "ffvpn_e|"):
-		host := strings.TrimPrefix(data, "ffvpn_e|")
-		if err := core.SwitchFFVPN(host); err != nil {
-			answerFFVPNCallback(bot, callback.ID, "❌ Lỗi: "+err.Error(), true)
-			return
+		ref := strings.TrimPrefix(data, "ffvpn_e|")
+		if code, idx, ok := parseFFVPNEdgeRef(ref); ok {
+			if !switchFFVPNEdgeRef(bot, callback.ID, code, idx) {
+				return
+			}
+		} else {
+			// legacy "<host>" payload kept for panels sent before short refs
+			if err := core.SwitchFFVPN(ref); err != nil {
+				answerFFVPNCallback(bot, callback.ID, "❌ Lỗi: "+err.Error(), true)
+				return
+			}
+			answerFFVPNCallback(bot, callback.ID, "✅ Đã chuyển sang "+ref, false)
 		}
-		answerFFVPNCallback(bot, callback.ID, "✅ Đã chuyển sang "+host, false)
 	case strings.HasPrefix(data, "ffvpn|"):
 		// legacy single-tap payload (kept for old messages)
 		host := strings.TrimPrefix(data, "ffvpn|")
@@ -131,22 +178,28 @@ func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 // country page vs expanded country edges.
 func ffvpnKeyboardForCallback(info core.FFVPNInfo, data string) tgbotapi.InlineKeyboardMarkup {
 	order, byCode := groupCountriesByCode(info)
-	switch {
-	case strings.HasPrefix(data, "ffvpn_k|"):
-		parts := strings.SplitN(strings.TrimPrefix(data, "ffvpn_k|"), "|", 2)
-		code := parts[0]
-		page := 0
-		if len(parts) == 2 {
-			fmt.Sscanf(parts[1], "%d", &page)
+
+	if strings.HasPrefix(data, "ffvpn_ke|") {
+		parts := strings.Split(strings.TrimPrefix(data, "ffvpn_ke|"), "|")
+		if len(parts) == 3 {
+			countryPage, _ := strconv.Atoi(parts[1])
+			edgePage, _ := strconv.Atoi(parts[2])
+			return ffvpnEdgePage(byCode, info, parts[0], edgePage, countryPage)
 		}
-		return ffvpnEdgePage(order, byCode, info, code, page)
-	case strings.HasPrefix(data, "ffvpn_c|"):
-		page := 0
-		fmt.Sscanf(strings.TrimPrefix(data, "ffvpn_c|"), "%d", &page)
-		return ffvpnCountryPage(order, byCode, info, page)
-	default:
-		return ffvpnCountryPage(order, byCode, info, 0)
 	}
+	if strings.HasPrefix(data, "ffvpn_k|") {
+		parts := strings.SplitN(strings.TrimPrefix(data, "ffvpn_k|"), "|", 2)
+		countryPage := 0
+		if len(parts) == 2 {
+			fmt.Sscanf(parts[1], "%d", &countryPage)
+		}
+		return ffvpnEdgePage(byCode, info, parts[0], 0, countryPage)
+	}
+	page := 0
+	if strings.HasPrefix(data, "ffvpn_c|") {
+		fmt.Sscanf(strings.TrimPrefix(data, "ffvpn_c|"), "%d", &page)
+	}
+	return ffvpnCountryPage(order, byCode, info, page)
 }
 
 // FormatFFVPNMessage renders the ffvpn panel.
@@ -164,15 +217,20 @@ func FormatFFVPNMessage(info core.FFVPNInfo) string {
 	return sb.String()
 }
 
-// ffvpnPage and ffvpnSel carry keyboard state through callback payloads —
-// stateless (no server-side session storage needed).
+// Callback payloads are stateless (no server-side session storage needed):
 //
-//	"ffvpn_c|<page>"        — country page N (20 countries per page)
-//	"ffvpn_k|<code>|<page>" — edges of country <code>, from page <page>
-//	"ffvpn_e|<host>"        — switch to edge <host>
-//	"ffvpnrefresh"          — re-render country page 0
-
-const ffvpnCountriesPerPage = 20
+//	"ffvpn_c|<page>"                           — country page N
+//	"ffvpn_k|<code>|<countryPage>"             — edges of <code>, page 0
+//	"ffvpn_ke|<code>|<countryPage>|<edgePage>" — edge page navigation
+//	"ffvpn_e|<code>|<index>"                   — switch to an edge (short ref)
+//	"ffvpnrefresh"                             — re-render country page 0
+//
+// Edge refs carry a country code + index instead of the hostname so the
+// payload stays under Telegram's 64-byte callback_data limit.
+const (
+	ffvpnCountriesPerPage = 20
+	ffvpnEdgesPerPage     = 20
+)
 
 // groupCountriesByCode indexes edges by country code (preserving order).
 func groupCountriesByCode(info core.FFVPNInfo) ([]string, map[string][]core.FFVPNEdge) {
@@ -187,16 +245,6 @@ func groupCountriesByCode(info core.FFVPNInfo) ([]string, map[string][]core.FFVP
 		byCode[e.CountryCode] = append(byCode[e.CountryCode], e)
 	}
 	return order, byCode
-}
-
-// countryName resolves a display name for a code from the edge list.
-func countryName(info core.FFVPNInfo, code string) string {
-	for _, e := range info.Servers {
-		if e.CountryCode == code {
-			return e.CountryName
-		}
-	}
-	return code
 }
 
 // CreateFFVPNKeyboard renders the country page (or a country's edges when
@@ -268,22 +316,58 @@ func ffvpnCountryPage(order []string, byCode map[string][]core.FFVPNEdge, info c
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-// ffvpnEdgePage renders the edges of one country + a back button.
-func ffvpnEdgePage(order []string, byCode map[string][]core.FFVPNEdge, info core.FFVPNInfo, code string, page int) tgbotapi.InlineKeyboardMarkup {
+// ffvpnEdgePage renders one page of a country's edges plus pagination and a
+// back button that returns to the country page the user came from.
+func ffvpnEdgePage(byCode map[string][]core.FFVPNEdge, info core.FFVPNInfo, code string, page, countryPage int) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for _, e := range byCode[code] {
+
+	edges := byCode[code]
+	pages := (len(edges) + ffvpnEdgesPerPage - 1) / ffvpnEdgesPerPage
+	if pages < 1 {
+		pages = 1
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= pages {
+		page = pages - 1
+	}
+	start := page * ffvpnEdgesPerPage
+	end := start + ffvpnEdgesPerPage
+	if end > len(edges) {
+		end = len(edges)
+	}
+
+	for i, e := range edges[start:end] {
 		icon := "🌐"
 		if e.ServerHost == info.Current.ServerHost {
 			icon = "✅"
 		}
 		label := fmt.Sprintf("%s %s:%d", icon, e.CityName, e.ServerPort)
+		ref := fmt.Sprintf("ffvpn_e|%s|%d", code, start+i)
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{
-			tgbotapi.NewInlineKeyboardButtonData(label, "ffvpn_e|"+e.ServerHost),
+			tgbotapi.NewInlineKeyboardButtonData(label, ref),
 		})
 	}
-	var nav []tgbotapi.InlineKeyboardButton
-	nav = append(nav, tgbotapi.NewInlineKeyboardButtonData("◀️ Quốc gia", fmt.Sprintf("ffvpn_c|%d", page)))
-	rows = append(rows, nav)
+
+	if pages > 1 {
+		var nav []tgbotapi.InlineKeyboardButton
+		if page > 0 {
+			nav = append(nav, tgbotapi.NewInlineKeyboardButtonData(
+				"◀️ Trước", fmt.Sprintf("ffvpn_ke|%s|%d|%d", code, countryPage, page-1)))
+		}
+		nav = append(nav, tgbotapi.NewInlineKeyboardButtonData(
+			fmt.Sprintf("📄 %d/%d", page+1, pages), "ffvpn_noop"))
+		if page < pages-1 {
+			nav = append(nav, tgbotapi.NewInlineKeyboardButtonData(
+				"Sau ▶️", fmt.Sprintf("ffvpn_ke|%s|%d|%d", code, countryPage, page+1)))
+		}
+		rows = append(rows, nav)
+	}
+
+	rows = append(rows, []tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardButtonData("◀️ Quốc gia", fmt.Sprintf("ffvpn_c|%d", countryPage)),
+	})
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 

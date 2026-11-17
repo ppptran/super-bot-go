@@ -56,7 +56,6 @@ type FFVPNEdge struct {
 // FFVPNStatus is the proxy state snapshot.
 type FFVPNStatus struct {
 	Running     bool   `json:"running"`
-	Listen      string `json:"listen,omitempty"`
 	Server      string `json:"server,omitempty"`
 	Account     string `json:"account,omitempty"`
 	EdgeSuspect bool   `json:"edge_suspect,omitempty"`
@@ -64,18 +63,13 @@ type FFVPNStatus struct {
 
 // FFVPNInfo aggregates edges + selection + state for the dashboards.
 type FFVPNInfo struct {
-	Current  FFVPNEdge
-	Status   FFVPNStatus
-	Servers  []FFVPNEdge
-	EdgeList string // formatted for display, filled by GetFFVPNInfo
-	Error    string
+	Current FFVPNEdge
+	Status  FFVPNStatus
+	Servers []FFVPNEdge
+	Error   string
 }
 
 func ffvpnClient() *http.Client { return &http.Client{Timeout: 10 * time.Second} }
-
-func ffvpnLabel(e FFVPNEdge) string {
-	return fmt.Sprintf("%s/%s — %s:%d", e.CountryName, e.CityName, e.ServerHost, e.ServerPort)
-}
 
 // GetFFVPNInfo fetches edges + status; async channel style like GetSingboxInfo.
 func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
@@ -101,16 +95,15 @@ func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 		return
 	}
 	var data struct {
-		Current FFVPNEdge   `json:"current"`
-		Servers []FFVPNEdge `json:"servers"`
+		Current json.RawMessage `json:"current"`
+		Servers []FFVPNEdge     `json:"servers"`
 		Proxy   struct {
 			Running     bool   `json:"running"`
 			Server      string `json:"server"`
 			Account     string `json:"account"`
 			EdgeSuspect bool   `json:"edge_suspect"`
 		} `json:"proxy"`
-		EdgeCount int    `json:"edge_count"`
-		Error     string `json:"error"`
+		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		resultChan <- FFVPNInfo{Error: "parse edges: " + err.Error()}
@@ -127,10 +120,13 @@ func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 		if data.Servers[i].CityName != data.Servers[j].CityName {
 			return data.Servers[i].CityName < data.Servers[j].CityName
 		}
-		return data.Servers[i].ServerHost < data.Servers[j].ServerHost
+		if data.Servers[i].ServerHost != data.Servers[j].ServerHost {
+			return data.Servers[i].ServerHost < data.Servers[j].ServerHost
+		}
+		return data.Servers[i].ServerPort < data.Servers[j].ServerPort
 	})
 	info := FFVPNInfo{
-		Current: data.Current,
+		Current: decodeFFVPNCurrent(data.Current, data.Servers, data.Proxy.Server),
 		Status: FFVPNStatus{
 			Running:     data.Proxy.Running,
 			Server:      data.Proxy.Server,
@@ -139,16 +135,66 @@ func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 		},
 		Servers: data.Servers,
 	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📍 Current: %s\n", ffvpnLabel(data.Current)))
-	sb.WriteString(fmt.Sprintf("🔗 Proxy: %s on %s (account %s)\n",
-		onOff(info.Status.Running), valOr(info.Status.Server, "—"), valOr(info.Status.Account, "—")))
-	if info.Status.EdgeSuspect {
-		sb.WriteString("⚠️ This edge is rejecting tunnels server-side — pick another server.\n")
-	}
-	sb.WriteString(fmt.Sprintf("🌐 %d edges available", len(data.Servers)))
-	info.EdgeList = sb.String()
 	resultChan <- info
+}
+
+// decodeFFVPNCurrent tolerates the shapes /api/edges may use for the current
+// selection: a full edge object, a bare host string, or per-edge "current"
+// flags. Having the host is enough for the panel; when we can match a server
+// we upgrade it to the full record so country/city/port render too.
+func decodeFFVPNCurrent(raw json.RawMessage, servers []FFVPNEdge, proxyServer string) FFVPNEdge {
+	var current FFVPNEdge
+	if len(raw) > 0 {
+		switch raw[0] {
+		case '{':
+			_ = json.Unmarshal(raw, &current)
+		case '"':
+			var host string
+			if json.Unmarshal(raw, &host) == nil {
+				current.ServerHost = host
+			}
+		}
+	}
+	if current.ServerHost == "" {
+		for _, e := range servers {
+			if e.Current {
+				current = e
+				break
+			}
+		}
+	}
+	if current.ServerHost == "" {
+		current.ServerHost = proxyServer
+	}
+	if current.ServerHost != "" {
+		for _, e := range servers {
+			if e.ServerHost == current.ServerHost {
+				current = e
+				break
+			}
+		}
+	}
+	return current
+}
+
+// FindFFVPNEdge resolves a country code + per-country index reference. The
+// index follows the sorted Servers order, which is the same order both
+// keyboards render, so a ref stays stable across refreshes.
+func FindFFVPNEdge(info FFVPNInfo, countryCode string, index int) (FFVPNEdge, bool) {
+	if index < 0 {
+		return FFVPNEdge{}, false
+	}
+	n := 0
+	for _, e := range info.Servers {
+		if e.CountryCode != countryCode {
+			continue
+		}
+		if n == index {
+			return e, true
+		}
+		n++
+	}
+	return FFVPNEdge{}, false
 }
 
 // SwitchFFVPN selects an edge by host name (the button payload).
@@ -207,39 +253,6 @@ func SwitchFFVPNEdge(e FFVPNEdge) error {
 	return nil
 }
 
-// GetFFVPNStatus fetches /api/edges/status for quick checks.
-func GetFFVPNStatus(ctx context.Context) (FFVPNStatus, error) {
-	var st FFVPNStatus
-	if !ffvpnConfigured() {
-		return st, fmt.Errorf("FFVPN_API / FFVPN_KEY not configured in .env")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		ffvpnAPI()+"/api/edges/status", nil)
-	if err != nil {
-		return st, err
-	}
-	req.Header.Set("X-Ingest-Key", ffvpnKey())
-	resp, err := ffvpnClient().Do(req)
-	if err != nil {
-		return st, err
-	}
-	defer resp.Body.Close()
-	var data struct {
-		Selected struct {
-			ServerHost string `json:"server_host"`
-		} `json:"selected"`
-		Proxy FFVPNStatus `json:"proxy"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return st, err
-	}
-	st = data.Proxy
-	if st.Server == "" {
-		st.Server = data.Selected.ServerHost
-	}
-	return st, nil
-}
-
 // helpers
 
 // ffvpnHTTPError turns a non-2xx reply into an error carrying the status
@@ -255,28 +268,4 @@ func ffvpnHTTPError(op string, resp *http.Response) error {
 		msg = http.StatusText(resp.StatusCode)
 	}
 	return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, msg)
-}
-
-func boolFromAny(v any) bool {
-	b, _ := v.(bool)
-	return b
-}
-
-func stringFromAny(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-func onOff(b bool) string {
-	if b {
-		return "running"
-	}
-	return "stopped"
-}
-
-func valOr(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
 }

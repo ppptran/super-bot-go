@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"super-bot/core"
 	"time"
@@ -60,25 +61,32 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 	})
 
 	// Payload routing:
-	//   ffvpn_e_<host>       — switch edge
-	//   ffvpn_k_<code>_<page> — expand country edges
-	//   ffvpn_ke_<code>_<page> — edge page navigation inside a country
-	//   ffvpn_p_<page>       — country page navigation
-	//   ffvpn_refresh        — re-render page 0
+	//   ffvpn_e_<code>_<idx>                     — switch edge
+	//   ffvpn_k_<code>_<countryPage>             — expand country edges
+	//   ffvpn_ke_<code>_<countryPage>_<edgePage> — edge page navigation
+	//   ffvpn_p_<page>                           — country page navigation
+	//   ffvpn_refresh                            — re-render page 0
 	switch {
 	case strings.HasPrefix(customID, "ffvpn_e_"):
-		host := strings.TrimPrefix(customID, "ffvpn_e_")
-		if err := core.SwitchFFVPN(host); err != nil {
+		rest := strings.TrimPrefix(customID, "ffvpn_e_")
+		if code, idx, ok := parseFFVPNEdgeRefD(rest); ok {
+			if !switchFFVPNEdgeRefD(s, i, code, idx) {
+				return
+			}
+		} else {
+			// legacy "<host>" payload kept for panels sent before short refs
+			if err := core.SwitchFFVPN(rest); err != nil {
+				s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+					Content: "❌ " + err.Error(),
+					Flags:   discordgo.MessageFlagsEphemeral,
+				})
+				return
+			}
 			s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-				Content: "❌ " + err.Error(),
+				Content: fmt.Sprintf("✅ Đã chuyển sang %s", rest),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			})
-			return
 		}
-		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-			Content: fmt.Sprintf("✅ Đã chuyển sang %s", host),
-			Flags:   discordgo.MessageFlagsEphemeral,
-		})
 	case strings.HasPrefix(customID, "ffvpn_k_") || strings.HasPrefix(customID, "ffvpn_ke_") || strings.HasPrefix(customID, "ffvpn_p_"):
 		// navigation only — no switch, just re-render below
 	case customID == "ffvpn_refresh":
@@ -107,18 +115,22 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 		rest := strings.TrimPrefix(customID, "ffvpn_k_")
 		parts := strings.SplitN(rest, "_", 2)
 		if len(parts) == 2 {
-			page := 0
-			fmt.Sscanf(parts[1], "%d", &page)
-			components = CreateFFVPNEdgeButtonsD(info, parts[0], page)
+			countryPage := 0
+			fmt.Sscanf(parts[1], "%d", &countryPage)
+			components = CreateFFVPNEdgeButtonsD(info, parts[0], 0, countryPage)
 		}
 	case strings.HasPrefix(customID, "ffvpn_ke_"):
-		// Edge-page nav payload carries the country code.
+		// <code>_<countryPage>_<edgePage>; fall back to the old
+		// <code>_<edgePage> shape for panels sent before this change.
 		rest := strings.TrimPrefix(customID, "ffvpn_ke_")
-		if idx := strings.LastIndexByte(rest, '_'); idx > 0 {
-			code, pageStr := rest[:idx], rest[idx+1:]
-			page := 0
-			fmt.Sscanf(pageStr, "%d", &page)
-			components = CreateFFVPNEdgeButtonsD(info, code, page)
+		parts := strings.SplitN(rest, "_", 3)
+		if len(parts) == 3 {
+			countryPage, _ := strconv.Atoi(parts[1])
+			edgePage, _ := strconv.Atoi(parts[2])
+			components = CreateFFVPNEdgeButtonsD(info, parts[0], edgePage, countryPage)
+		} else if len(parts) == 2 {
+			edgePage, _ := strconv.Atoi(parts[1])
+			components = CreateFFVPNEdgeButtonsD(info, parts[0], edgePage, 0)
 		}
 	case strings.HasPrefix(customID, "ffvpn_p_"):
 		page := 0
@@ -136,4 +148,54 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 			Components: components,
 		})
 	}
+}
+
+// parseFFVPNEdgeRefD parses the short "<countryCode>_<index>" payload.
+func parseFFVPNEdgeRefD(ref string) (string, int, bool) {
+	sep := strings.LastIndexByte(ref, '_')
+	if sep <= 0 {
+		return "", 0, false
+	}
+	idx, err := strconv.Atoi(ref[sep+1:])
+	if err != nil || idx < 0 {
+		return "", 0, false
+	}
+	return ref[:sep], idx, true
+}
+
+// switchFFVPNEdgeRefD resolves and switches an edge referenced by country +
+// index. This keeps hostnames out of CustomIDs and makes the ref port-aware.
+func switchFFVPNEdgeRefD(s *discordgo.Session, i *discordgo.InteractionCreate, code string, idx int) bool {
+	ctx, cancel := ffvpnContextD()
+	defer cancel()
+	ch := make(chan core.FFVPNInfo, 1)
+	core.GetFFVPNInfo(ctx, ch)
+	info := <-ch
+	if info.Error != "" {
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ " + info.Error,
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		return false
+	}
+	edge, ok := core.FindFFVPNEdge(info, code, idx)
+	if !ok {
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ Edge không còn tồn tại — bấm Refresh",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		return false
+	}
+	if err := core.SwitchFFVPNEdge(edge); err != nil {
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "❌ " + err.Error(),
+			Flags:   discordgo.MessageFlagsEphemeral,
+		})
+		return false
+	}
+	s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: fmt.Sprintf("✅ Đã chuyển sang %s:%d", edge.CityName, edge.ServerPort),
+		Flags:   discordgo.MessageFlagsEphemeral,
+	})
+	return true
 }

@@ -26,10 +26,9 @@ FFVPN_KEY=<FXVPN_INGEST_KEY value>     # shared secret
 ## Dispatch wiring (already applied in this fork)
 
 Discord: `/ffvpn` slash command case + `ffvpn*` CustomID prefix routing to
-`HandleFFVPNButtonClick`. Telegram: `ffvpn` command case + `ffvpn`-prefixed
-callback routing to `HandleFFVPNButtonCallback`. Discord slash commands
-also need the `/ffvpn` entry registered in the command-registration code
-(same place `/status` is registered).
+`HandleFFVPNButtonClick`, and the `/ffvpn` command registered in
+`cmd/discord` and `cmd/both` next to `/status`. Telegram: `ffvpn` command
+case + `ffvpn`-prefixed callback routing to `HandleFFVPNButtonCallback`.
 
 ## Traffic path
 

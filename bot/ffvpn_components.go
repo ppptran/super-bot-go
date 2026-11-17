@@ -33,7 +33,7 @@ func groupCountriesByCodeD(info core.FFVPNInfo) ([]string, map[string][]core.FFV
 	return order, byCode
 }
 
-// CreateFFVPNButtons renders country buttons (25 per page, nav row).
+// CreateFFVPNButtons renders country buttons (20 per page, nav row).
 func CreateFFVPNButtons(info core.FFVPNInfo) []discordgo.MessageComponent {
 	return ffvpnCountryButtonsD(info, 0)
 }
@@ -106,7 +106,6 @@ func ffvpnCountryButtonsD(info core.FFVPNInfo, page int) []discordgo.MessageComp
 		nav = append(nav, discordgo.Button{
 			Label: "🔄 Refresh", Style: discordgo.PrimaryButton,
 			CustomID: "ffvpn_refresh",
-			Emoji:    &discordgo.ComponentEmoji{Name: "🔄"},
 		})
 		components = append(components, discordgo.ActionsRow{Components: nav})
 	} else {
@@ -116,7 +115,6 @@ func ffvpnCountryButtonsD(info core.FFVPNInfo, page int) []discordgo.MessageComp
 					Label:    "🔄 Refresh",
 					Style:    discordgo.PrimaryButton,
 					CustomID: "ffvpn_refresh",
-					Emoji:    &discordgo.ComponentEmoji{Name: "🔄"},
 				},
 			},
 		})
@@ -125,7 +123,9 @@ func ffvpnCountryButtonsD(info core.FFVPNInfo, page int) []discordgo.MessageComp
 }
 
 // CreateFFVPNEdgeButtonsD renders the edges of one country + back button.
-func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []discordgo.MessageComponent {
+// countryPage rides along so the back button returns to the country page the
+// user came from instead of always jumping to page 0.
+func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page, countryPage int) []discordgo.MessageComponent {
 	_, byCode := groupCountriesByCodeD(info)
 	var components []discordgo.MessageComponent
 	var row []discordgo.MessageComponent
@@ -147,7 +147,7 @@ func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []disco
 		end = len(edges)
 	}
 
-	for _, e := range edges[start:end] {
+	for i, e := range edges[start:end] {
 		emoji := "🌐"
 		if e.ServerHost == info.Current.ServerHost {
 			emoji = "✅"
@@ -155,7 +155,7 @@ func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []disco
 		btn := discordgo.Button{
 			Label:    fmt.Sprintf("%s:%d", e.CityName, e.ServerPort),
 			Style:    discordgo.SecondaryButton,
-			CustomID: "ffvpn_e_" + e.ServerHost,
+			CustomID: fmt.Sprintf("ffvpn_e_%s_%d", code, start+i),
 			Emoji:    &discordgo.ComponentEmoji{Name: emoji},
 		}
 		row = append(row, btn)
@@ -172,19 +172,19 @@ func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []disco
 	if page > 0 {
 		nav = append(nav, discordgo.Button{
 			Label: "◀️ Trước", Style: discordgo.PrimaryButton,
-			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d", code, page-1),
+			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d_%d", code, countryPage, page-1),
 		})
 	}
 	if page < pages-1 {
 		nav = append(nav, discordgo.Button{
 			Label: "Sau ▶️", Style: discordgo.PrimaryButton,
-			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d", code, page+1),
+			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d_%d", code, countryPage, page+1),
 		})
 	}
 	nav = append(nav, discordgo.Button{
 		Label:    "◀️ Quốc gia",
 		Style:    discordgo.PrimaryButton,
-		CustomID: fmt.Sprintf("ffvpn_p_%d", page),
+		CustomID: fmt.Sprintf("ffvpn_p_%d", countryPage),
 	})
 	components = append(components, discordgo.ActionsRow{Components: nav})
 	return components

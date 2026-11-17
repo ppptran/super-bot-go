@@ -109,3 +109,98 @@ func TestSwitchFFVPNEdgeHTTPError(t *testing.T) {
 		t.Fatal("expected an error for HTTP 401")
 	}
 }
+
+func TestDecodeFFVPNCurrentShapes(t *testing.T) {
+	servers := []FFVPNEdge{
+		{CountryCode: "US", CountryName: "United States", CityName: "Ashburn", ServerHost: "us1.example", ServerPort: 443},
+		{CountryCode: "SG", CountryName: "Singapore", CityName: "Singapore", ServerHost: "sg1.example", ServerPort: 443},
+	}
+
+	cases := []struct {
+		name        string
+		raw         string
+		proxyServer string
+		wantHost    string
+		wantCountry string
+	}{
+		{
+			name:        "full edge object",
+			raw:         `{"country_code":"SG","country_name":"Singapore","city_name":"Singapore","server_host":"sg1.example","server_port":443}`,
+			wantHost:    "sg1.example",
+			wantCountry: "SG",
+		},
+		{
+			name:        "bare host string",
+			raw:         `"sg1.example"`,
+			wantHost:    "sg1.example",
+			wantCountry: "SG",
+		},
+		{
+			name:        "host string outside the server list",
+			raw:         `"de1.example"`,
+			wantHost:    "de1.example",
+			wantCountry: "",
+		},
+		{
+			name:        "proxy.server fallback",
+			raw:         `null`,
+			proxyServer: "sg1.example",
+			wantHost:    "sg1.example",
+			wantCountry: "SG",
+		},
+		{
+			name:     "nothing to resolve",
+			raw:      `null`,
+			wantHost: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw json.RawMessage
+			if tc.raw != "" {
+				raw = json.RawMessage(tc.raw)
+			}
+			got := decodeFFVPNCurrent(raw, servers, tc.proxyServer)
+			if got.ServerHost != tc.wantHost {
+				t.Fatalf("host = %q, want %q", got.ServerHost, tc.wantHost)
+			}
+			if got.CountryCode != tc.wantCountry {
+				t.Fatalf("country = %q, want %q", got.CountryCode, tc.wantCountry)
+			}
+		})
+	}
+}
+
+func TestDecodeFFVPNCurrentPrefersPerEdgeFlag(t *testing.T) {
+	servers := []FFVPNEdge{
+		{CountryCode: "US", ServerHost: "us1.example"},
+		{CountryCode: "SG", ServerHost: "sg1.example", Current: true},
+	}
+	got := decodeFFVPNCurrent(nil, servers, "us1.example")
+	if got.ServerHost != "sg1.example" {
+		t.Fatalf("host = %q, want the per-edge current flag (sg1.example)", got.ServerHost)
+	}
+}
+
+func TestFindFFVPNEdge(t *testing.T) {
+	info := FFVPNInfo{Servers: []FFVPNEdge{
+		{CountryCode: "SG", CityName: "Singapore", ServerHost: "sg1.example", ServerPort: 443},
+		{CountryCode: "US", CityName: "Ashburn", ServerHost: "us1.example", ServerPort: 443},
+		{CountryCode: "SG", CityName: "Jurong", ServerHost: "sg2.example", ServerPort: 8443},
+	}}
+
+	edge, ok := FindFFVPNEdge(info, "SG", 1)
+	if !ok || edge.ServerHost != "sg2.example" || edge.ServerPort != 8443 {
+		t.Fatalf("SG/1 = %+v, %v", edge, ok)
+	}
+	if _, ok := FindFFVPNEdge(info, "SG", 2); ok {
+		t.Fatal("out-of-range index resolved")
+	}
+	if _, ok := FindFFVPNEdge(info, "SG", -1); ok {
+		t.Fatal("negative index resolved")
+	}
+	if _, ok := FindFFVPNEdge(info, "DE", 0); ok {
+		t.Fatal("unknown country resolved")
+	}
+}
