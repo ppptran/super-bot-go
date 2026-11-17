@@ -50,6 +50,11 @@ func HandlePingCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 // HandleButtonClick handles button interactions (node selection and refresh)
 func HandleButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !authorizedChannel(i.ChannelID) {
+		respondUnauthorized(s, i)
+		return
+	}
+
 	customID := i.MessageComponentData().CustomID
 
 	// Defer response
@@ -152,6 +157,22 @@ func HandleStatusMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 func HandlePingMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	latency := s.HeartbeatLatency().Milliseconds()
 	s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("🏓 Pong! Latency: %dms", latency))
+}
+
+// authorizedChannel limits button interactions to DISCORD_CHANNEL_ID when it
+// is set. An empty value keeps the previous behaviour for existing setups.
+func authorizedChannel(channelID string) bool {
+	return core.DiscordChannelID == "" || channelID == core.DiscordChannelID
+}
+
+func respondUnauthorized(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "⛔ Lệnh này không được phép ở kênh này.",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	})
 }
 
 // Helper function to create string pointer

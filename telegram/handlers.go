@@ -41,6 +41,11 @@ func HandleStatusCommand(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 // HandleButtonCallback handles button clicks (node selection and refresh)
 func HandleButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	if !IsAuthorizedCallback(update) {
+		answerUnauthorized(bot, update)
+		return
+	}
+
 	callback := update.CallbackQuery
 	data := callback.Data
 
@@ -52,14 +57,14 @@ func HandleButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		bot.Request(tgbotapi.NewCallback(callback.ID, "🔄 Đang cập nhật..."))
 	} else if strings.HasPrefix(data, "set|") {
 		nodeName := strings.TrimPrefix(data, "set|")
-		
+
 		// Switch node
 		err := core.SwitchNode(nodeName)
 		if err != nil {
 			bot.Request(tgbotapi.NewCallbackWithAlert(callback.ID, "❌ Lỗi: "+err.Error()))
 			return // Don't refresh if failed
 		}
-		
+
 		bot.Request(tgbotapi.NewCallback(callback.ID, fmt.Sprintf("✅ Đã chọn %s", nodeName)))
 	}
 
@@ -84,5 +89,22 @@ func HandleButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	_, err = bot.Send(edit)
 	if err != nil {
 		// Ignore "message is not modified" error
+	}
+}
+
+// IsAuthorizedCallback reports whether a callback query comes from the
+// configured chat. An unset TELEGRAM_CHAT_ID rejects every callback so a
+// missing .env cannot silently open the bot to forwarded messages.
+func IsAuthorizedCallback(update tgbotapi.Update) bool {
+	cq := update.CallbackQuery
+	if cq == nil || cq.Message == nil || core.TelegramChatID == "" {
+		return false
+	}
+	return fmt.Sprintf("%d", cq.Message.Chat.ID) == core.TelegramChatID
+}
+
+func answerUnauthorized(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	if cq := update.CallbackQuery; cq != nil {
+		bot.Request(tgbotapi.NewCallbackWithAlert(cq.ID, "⛔ Không có quyền"))
 	}
 }

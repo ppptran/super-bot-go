@@ -1,11 +1,11 @@
 package main
 
 import (
-	"strings"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"super-bot/bot"
 	"super-bot/core"
 	"syscall"

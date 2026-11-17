@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 	"super-bot/core"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -49,6 +49,11 @@ func HandleFFVPNStatusCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 
 // HandleFFVPNButtonClick handles "ffvpn_<host>" and "ffvpn_refresh".
 func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if !authorizedChannel(i.ChannelID) {
+		respondUnauthorized(s, i)
+		return
+	}
+
 	customID := i.MessageComponentData().CustomID
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -95,13 +96,18 @@ func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 		return
 	}
 	defer resp.Body.Close()
+	if err := ffvpnHTTPError("ffvpn edges", resp); err != nil {
+		resultChan <- FFVPNInfo{Error: err.Error()}
+		return
+	}
 	var data struct {
-		Current   FFVPNEdge   `json:"current"`
-		Servers   []FFVPNEdge `json:"servers"`
-		Proxy     struct {
-			Running bool   `json:"running"`
-			Server  string `json:"server"`
-			Account string `json:"account"`
+		Current FFVPNEdge   `json:"current"`
+		Servers []FFVPNEdge `json:"servers"`
+		Proxy   struct {
+			Running     bool   `json:"running"`
+			Server      string `json:"server"`
+			Account     string `json:"account"`
+			EdgeSuspect bool   `json:"edge_suspect"`
 		} `json:"proxy"`
 		EdgeCount int    `json:"edge_count"`
 		Error     string `json:"error"`
@@ -126,9 +132,10 @@ func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 	info := FFVPNInfo{
 		Current: data.Current,
 		Status: FFVPNStatus{
-			Running: data.Proxy.Running,
-			Server:  data.Proxy.Server,
-			Account: data.Proxy.Account,
+			Running:     data.Proxy.Running,
+			Server:      data.Proxy.Server,
+			Account:     data.Proxy.Account,
+			EdgeSuspect: data.Proxy.EdgeSuspect,
 		},
 		Servers: data.Servers,
 	}
@@ -186,6 +193,9 @@ func SwitchFFVPNEdge(e FFVPNEdge) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if err := ffvpnHTTPError("ffvpn select", resp); err != nil {
+		return err
+	}
 	var out struct {
 		Error string `json:"error"`
 		Note  string `json:"note"`
@@ -231,6 +241,22 @@ func GetFFVPNStatus(ctx context.Context) (FFVPNStatus, error) {
 }
 
 // helpers
+
+// ffvpnHTTPError turns a non-2xx reply into an error carrying the status
+// and a body snippet. Without this, endpoints that answer 401/500 with
+// plain text (or an empty body) look like a successful call.
+func ffvpnHTTPError(op string, resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		msg = http.StatusText(resp.StatusCode)
+	}
+	return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, msg)
+}
+
 func boolFromAny(v any) bool {
 	b, _ := v.(bool)
 	return b

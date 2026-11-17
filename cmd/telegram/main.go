@@ -1,10 +1,11 @@
 package main
 
 import (
-	"strings"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"super-bot/core"
 	"super-bot/telegram"
 	"syscall"
@@ -34,11 +35,10 @@ func main() {
 		for update := range updates {
 			// Handle commands
 			if update.Message != nil && update.Message.IsCommand() {
-				// Authorization check
-				if update.Message.Chat.ID != 0 && // Check chat ID if needed
-					update.Message.Chat.ID != 1825960187 { // Hardcode or use config
-					// Use config value for check
-					// We'll skip for now or use core.TelegramChatID parsing if needed
+				// Authorization check (fail closed).
+				if core.TelegramChatID == "" ||
+					fmt.Sprintf("%d", update.Message.Chat.ID) != core.TelegramChatID {
+					continue
 				}
 
 				switch update.Message.Command() {

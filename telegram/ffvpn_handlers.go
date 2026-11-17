@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 	"super-bot/core"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -31,57 +31,89 @@ func HandleFFVPNStatusCommand(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	core.GetFFVPNInfo(ctx, ch)
 	info := <-ch
 
-	// Render, preferring an in-place edit of the "Đang tải..." message;
-	// any edit failure (stale message, rate limit, not-modified) falls back
-	// to sending a fresh panel message so the panel ALWAYS appears — a
-	// swallowed failure is what made the first /ffvpn look ignored.
 	text := FormatFFVPNMessage(info)
 	keyboard := CreateFFVPNKeyboard(info)
 	if info.Error != "" {
 		text = "❌ ffvpn: " + info.Error
 	}
-	edit := tgbotapi.NewEditMessageText(update.Message.Chat.ID, sent.MessageID, text)
+	sendFFVPNPanel(bot, update.Message.Chat.ID, sent.MessageID, text, keyboard)
+}
+
+// sendFFVPNPanel edits the panel in place. "message is not modified" is a
+// no-op, not a failure; any other edit error falls back to a fresh message
+// so the panel never silently disappears.
+func sendFFVPNPanel(bot *tgbotapi.BotAPI, chatID int64, messageID int, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
 	edit.ParseMode = "Markdown"
 	edit.ReplyMarkup = &keyboard
 	if _, err := bot.Send(edit); err != nil {
-		fallback := tgbotapi.NewMessage(update.Message.Chat.ID, text)
+		if strings.Contains(err.Error(), "message is not modified") {
+			return
+		}
+		log.Printf("ffvpn: edit failed (%v), sending a fresh panel", err)
+		fallback := tgbotapi.NewMessage(chatID, text)
 		fallback.ParseMode = "Markdown"
 		fallback.ReplyMarkup = &keyboard
-		bot.Send(fallback)
+		if _, ferr := bot.Send(fallback); ferr != nil {
+			log.Printf("ffvpn: fallback send failed: %v", ferr)
+		}
 	}
 }
 
-// HandleFFVPNButtonCallback handles "ffvpn|<host>" and "ffvpnrefresh".
+// answerFFVPNCallback answers a callback query exactly once. Telegram rejects
+// a second answer for the same query ID, which used to swallow the real
+// success/error toast.
+func answerFFVPNCallback(bot *tgbotapi.BotAPI, id, text string, alert bool) {
+	var cfg tgbotapi.CallbackConfig
+	if alert {
+		cfg = tgbotapi.NewCallbackWithAlert(id, text)
+	} else {
+		cfg = tgbotapi.NewCallback(id, text)
+	}
+	if _, err := bot.Request(cfg); err != nil {
+		log.Printf("ffvpn: answer callback: %v", err)
+	}
+}
+
+// HandleFFVPNButtonCallback handles "ffvpn_e|<host>" and navigation payloads.
 func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	if !IsAuthorizedCallback(update) {
+		answerUnauthorized(bot, update)
+		return
+	}
+
 	callback := update.CallbackQuery
 	data := callback.Data
 
+	// Answer once: switch actions answer after the API call so the toast
+	// carries the real result; navigation answers immediately.
 	switch {
 	case data == "ffvpnrefresh":
-		bot.Request(tgbotapi.NewCallback(callback.ID, "🔄 Đang cập nhật..."))
-	case data == "ffvpn_noop":
-		bot.Request(tgbotapi.NewCallback(callback.ID, ""))
-	case strings.HasPrefix(data, "ffvpn_c|"):
-		bot.Request(tgbotapi.NewCallback(callback.ID, ""))
+		answerFFVPNCallback(bot, callback.ID, "🔄 Đang cập nhật...", false)
+	case data == "ffvpn_noop", strings.HasPrefix(data, "ffvpn_c|"):
+		answerFFVPNCallback(bot, callback.ID, "", false)
 	case strings.HasPrefix(data, "ffvpn_e|"):
 		host := strings.TrimPrefix(data, "ffvpn_e|")
-		bot.Request(tgbotapi.NewCallback(callback.ID, "🔄 Đang chuyển sang "+host+"..."))
 		if err := core.SwitchFFVPN(host); err != nil {
-			bot.Request(tgbotapi.NewCallbackWithAlert(callback.ID, "❌ Lỗi: "+err.Error()))
-		} else {
-			bot.Request(tgbotapi.NewCallback(callback.ID, "✅ Đã chuyển sang "+host))
+			answerFFVPNCallback(bot, callback.ID, "❌ Lỗi: "+err.Error(), true)
+			return
 		}
+		answerFFVPNCallback(bot, callback.ID, "✅ Đã chuyển sang "+host, false)
 	case strings.HasPrefix(data, "ffvpn|"):
 		// legacy single-tap payload (kept for old messages)
 		host := strings.TrimPrefix(data, "ffvpn|")
-		bot.Request(tgbotapi.NewCallback(callback.ID, "🔄 Đang chuyển sang "+host+"..."))
 		if err := core.SwitchFFVPN(host); err != nil {
-			bot.Request(tgbotapi.NewCallbackWithAlert(callback.ID, "❌ Lỗi: "+err.Error()))
-		} else {
-			bot.Request(tgbotapi.NewCallback(callback.ID, "✅ Đã chuyển sang "+host))
+			answerFFVPNCallback(bot, callback.ID, "❌ Lỗi: "+err.Error(), true)
+			return
 		}
+		answerFFVPNCallback(bot, callback.ID, "✅ Đã chuyển sang "+host, false)
+	default:
+		answerFFVPNCallback(bot, callback.ID, "", false)
 	}
 
+	if callback.Message == nil {
+		return
+	}
 	ctx, cancel := ffvpnContext()
 	defer cancel()
 	ch := make(chan core.FFVPNInfo, 1)
@@ -92,17 +124,7 @@ func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 	text := FormatFFVPNMessage(info)
 	keyboard := ffvpnKeyboardForCallback(info, data)
-	edit := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, text)
-	edit.ParseMode = "Markdown"
-	edit.ReplyMarkup = &keyboard
-	if _, err := bot.Send(edit); err != nil {
-		// Edited message may be gone/unmodified — send a fresh panel so the
-		// interaction never silently dies.
-		fallback := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
-		fallback.ParseMode = "Markdown"
-		fallback.ReplyMarkup = &keyboard
-		bot.Send(fallback)
-	}
+	sendFFVPNPanel(bot, callback.Message.Chat.ID, callback.Message.MessageID, text, keyboard)
 }
 
 // ffvpnKeyboardForCallback renders the keyboard matching the callback:
